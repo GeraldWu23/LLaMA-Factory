@@ -1,0 +1,14 @@
+### Note: DO NOT use quantized model or quantization_bit when merging lora adapters
+# llamafactory-cli export examples/merge_lora/qwen2vl_lora_sft_7b_demo.yaml
+
+### model
+model_name_or_path: /data/model/Qwen/Qwen2-VL-7B-Instruct
+adapter_name_or_path: /data/test/lora-models/qwen2vl_7b_split1_00_00_date_limit_analyse_ratio_1_2_28052025/checkpoint-1540
+template: qwen2_vl
+trust_remote_code: true
+
+### export
+export_dir: /data/gerald.hu/models/qwen2vl_7b_split1_00_00_date_limit_analyse_ratio_1_2_28052025_merge
+export_size: 5
+export_device: cpu  # choices: [cpu, auto]
+export_legacy_format: false

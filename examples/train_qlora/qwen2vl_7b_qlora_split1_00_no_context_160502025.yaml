@@ -1,0 +1,49 @@
+### llamafactory-cli train examples/train_qlora/qwen2vl_7b_qlora_llava_first_file.yaml
+report_to: wandb
+run_name: qwen2vl_7b_split1_00_no_context_ratio_1_2_16052025
+
+### model
+model_name_or_path: /data/model/Qwen/Qwen2-VL-7B-Instruct
+quantization_bit: 4
+quantization_method: bitsandbytes  # choices: [bitsandbytes (4/8), hqq (2/3/4/5/6/8), eetq (8)]
+
+### method
+stage: sft
+do_train: true
+finetuning_type: lora
+lora_target: all # q_proj, v_proj
+lora_r: 8
+lora_alpha: 16
+deepspeed: examples/deepspeed/ds_z2_offload_config.json
+
+### dataset
+dataset: train_no_context_data_split1_00_p6m2_ratio_1_2
+template: qwen2_vl
+cutoff_len: 2048
+max_samples: 1000000
+overwrite_cache: true
+preprocessing_num_workers: 16
+
+### output
+output_dir: /data/test/lora-models/qwen2vl_7b_split1_00_no_context_ratio_1_2_16052025
+logging_steps: 5
+save_steps: 200
+plot_loss: true
+overwrite_output_dir: true
+
+### train
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 256
+learning_rate: 1.0e-5
+num_train_epochs: 5
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true
+ddp_timeout: 180000000
+save_total_limit: 3
+
+### eval
+val_size: 0.01
+per_device_eval_batch_size: 1
+eval_strategy: steps
+eval_steps: 100

@@ -1,0 +1,14 @@
+### llamafactory-cli export examples/merge_lora/qwen2vl_gptq.yaml
+### model
+model_name_or_path: /data/gerald.hu/models/qwen2vl_7b_split1_00_00_date_limit_analyse_ratio_1_2_28052025_merge
+template: qwen2_vl
+
+### export
+export_dir: /data/gerald.hu/models/qwen2vl_7b_split1_00_00_date_limit_analyse_ratio_1_2_28052025_merge_4bit
+export_quantization_bit: 4
+export_quantization_dataset: data/c4_demo.jsonl
+export_size: 5
+export_device: cpu
+export_legacy_format: false
+
+
