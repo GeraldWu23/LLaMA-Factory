@@ -1,0 +1,12 @@
+### model
+model_name_or_path: /ldata/Qwen/Qwen3-32B
+template: qwen3_nothink
+trust_remote_code: true
+
+### export
+export_dir: /ldata/share_data/llm_risk_predicting/models/llm/merged
+export_quantization_bit: 4
+export_quantization_dataset: data/c4_demo_small.jsonl
+export_size: 5
+export_device: auto  # choices: [cpu, auto]
+export_legacy_format: false
