@@ -1,0 +1,51 @@
+### model
+model_name_or_path: /ldata/Qwen/Qwen3-32B
+report_to: wandb
+run_name: full_sft
+quantization_bit: 4
+quantization_method: bitsandbytes
+
+### method
+stage: sft
+do_train: true
+finetuning_type: lora
+lora_target: all
+lora_rank: 8
+lora_alpha: 16
+lora_dropout: 0.0
+deepspeed: examples/deepspeed/ds_z2_offload_config.json
+
+### dataset
+# dataset 由 shell 命令行传入；此处给个默认占位
+dataset: trainset_sft_s1ast_202508_202601_20260608
+template: qwen3_nothink
+cutoff_len: 4596
+max_samples: 200000
+overwrite_cache: true
+preprocessing_num_workers: 16
+
+### output
+# output_dir 由 shell 命令行传入
+logging_steps: 10
+save_strategy: epoch
+save_total_limit: 5
+load_best_model_at_end: true
+metric_for_best_model: eval_loss
+greater_is_better: false
+plot_loss: true
+overwrite_output_dir: true
+
+### train
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 8
+learning_rate: 1.0e-5
+num_train_epochs: 5
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true
+ddp_timeout: 180000000
+
+### eval
+val_size: 0.01
+per_device_eval_batch_size: 1
+eval_strategy: epoch

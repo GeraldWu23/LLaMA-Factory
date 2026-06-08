@@ -1,0 +1,39 @@
+### model
+model_name_or_path: /ldata/Qwen/Qwen3-32B
+report_to: wandb
+# run_name / dataset / adapter_name_or_path / output_dir 全部由 shell 命令行传入
+quantization_bit: 4
+quantization_method: bitsandbytes
+
+### method
+stage: sft
+do_train: true
+finetuning_type: lora
+lora_target: all
+lora_rank: 8
+lora_alpha: 16
+lora_dropout: 0.0
+deepspeed: examples/deepspeed/ds_z2_offload_config.json
+
+### dataset
+template: qwen3_nothink
+cutoff_len: 4596
+max_samples: 200000
+overwrite_cache: true
+preprocessing_num_workers: 16
+
+### output
+logging_steps: 10
+save_strategy: epoch
+plot_loss: true
+overwrite_output_dir: true
+
+### train
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 8
+learning_rate: 5.0e-6
+num_train_epochs: 2
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true
+ddp_timeout: 180000000
