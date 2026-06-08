@@ -1690,5 +1690,19 @@
       "prompt": "input",
       "response": "target"
     }
+  },
+  "trainset_sft_s1ast_202508_202601_20260608": {
+    "file_name": "trainset_sft_s1ast_202508_202601_20260608.json",
+    "columns": {
+      "prompt": "input",
+      "response": "target"
+    }
+  },
+  "trainset_rft_s1ast_202508_202601_20260608": {
+    "file_name": "trainset_rft_s1ast_202508_202601_20260608.json",
+    "columns": {
+      "prompt": "input",
+      "response": "target"
+    }
   }
 }

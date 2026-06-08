@@ -1,7 +1,7 @@
 ### model
 model_name_or_path: /ldata/Qwen/Qwen3-32B
 report_to: wandb
-run_name: qwen3-decoder
+run_name: 202606051554_long3k
 quantization_bit: 4
 quantization_method: bitsandbytes  # choices: [bitsandbytes (4/8), hqq (2/3/4/5/6/8), eetq (8)]
 
@@ -10,10 +10,13 @@ stage: sft
 do_train: true
 finetuning_type: lora
 lora_target: all
+lora_rank: 8
+lora_alpha: 16
+lora_dropout: 0.0
 deepspeed: examples/deepspeed/ds_z2_offload_config.json
 
 ### dataset
-dataset: cuishou_conv_samp10k
+dataset: cuishou_conv_long3k_50k_20260327
 template: qwen3_nothink
 cutoff_len: 4596  # 4096 + 200
 max_samples: 200000
@@ -21,7 +24,7 @@ overwrite_cache: true
 preprocessing_num_workers: 16
 
 ### output
-output_dir: /ldata/share_data/llm_risk_predicting/models/llm/lora_models/qwen3_32b_gen_cuishou_0302
+output_dir: /ldata/share_data/cuishou_conv/models/lora_models/qwen3_32b_gen_cuishou_long3k_0605
 logging_steps: 10
 save_steps: 400
 plot_loss: true
@@ -29,9 +32,9 @@ overwrite_output_dir: true
 
 ### train
 per_device_train_batch_size: 1
-gradient_accumulation_steps: 16
+gradient_accumulation_steps: 8
 learning_rate: 1.0e-5
-num_train_epochs: 5
+num_train_epochs: 10
 lr_scheduler_type: cosine
 warmup_ratio: 0.1
 bf16: true
