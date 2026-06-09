@@ -13,7 +13,7 @@ lora_target: all
 lora_rank: 8
 lora_alpha: 16
 lora_dropout: 0.0
-deepspeed: examples/deepspeed/ds_z2_offload_config.json
+#deepspeed: examples/deepspeed/ds_z2_offload_config.json
 
 ### dataset
 template: qwen3_nothink
