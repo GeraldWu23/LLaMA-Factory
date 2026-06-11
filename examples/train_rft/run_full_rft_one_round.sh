@@ -45,6 +45,7 @@ echo "[run_one_round] LORA_ROOT = $LORA_ROOT"
 
 # 数据集
 RFT_PROMPT_DATASET=trainset_rft_s1ast_202508_202601_20260608
+#RFT_PROMPT_DATASET=trainset_sft_s1ast_202508_202601_20260608
 RFT_PROMPT_PATH=$DATA_DIR/${RFT_PROMPT_DATASET}.json
 
 REWARD_MODEL=/ldata/share_data/rucui/model/model_qwen3_4B_emb_csdomain_1to10_JuntoSep_eith_conv_rm08_09_20260312_111329/checkpoint-11000
@@ -60,7 +61,7 @@ VLLM_TP=8
 
 # RFT 采样参数（完全对齐 notebook cell 4，no_think=True）
 RFT_N=8
-RFT_TEMP=0.2
+RFT_TEMP=0.7
 RFT_TOPP=0.98
 RFT_REP_PENALTY=1.2
 RFT_PRESENCE_PENALTY=0.4

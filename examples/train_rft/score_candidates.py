@@ -73,6 +73,10 @@ def main():
     #   (1) 已带 'message' 字段（如直接读 trainset_*）→ 不动
     #   (2) RFT 候选集（带 'input' + 'response'，没 'message'）
     #       → 用 input 中 '### 对话片段：' 之后的部分 + response 拼成对话
+    # 拼接规则与 eval_score.py 完全一致（严格对齐评估时的输入格式）：
+    #   - 去掉 SYS_MARKER 之前的指令段
+    #   - context 和 response 内部 '\n\n' → 单空格
+    #   - context 与 response 之间也用单空格连接
     SYS_MARKER = "### 对话片段："
     n_built_from_response = 0
     for d in raw_data:
@@ -82,7 +86,9 @@ def main():
             inp = d["input"]
             pos = inp.find(SYS_MARKER)
             context = inp[pos + len(SYS_MARKER):] if pos >= 0 else inp
-            d["message"] = [context.strip() + "\n\n" + d["response"].strip()]
+            context = context.replace("\n\n", " ").strip()
+            resp = d["response"].replace("\n\n", " ").strip()
+            d["message"] = [context + " " + resp]
             n_built_from_response += 1
         else:
             raise ValueError(
@@ -137,7 +143,9 @@ def main():
                     attention_mask=batch["attention_mask"],
                 )
                 probs = torch.softmax(logits, dim=-1)
-                pos_probs = probs[:, 1]
+                # reward model 输出 probs[:,1] 是"逾期概率"（越高越差），
+                # 取 1 - 之，转成"还款 / 不逾期概率"，让 select_top1 仍按"score 越高越好"工作
+                pos_probs = 1 - probs[:, 1]
                 all_pos_probs.append(accelerator.gather_for_metrics(pos_probs))
 
     if accelerator.is_main_process:
