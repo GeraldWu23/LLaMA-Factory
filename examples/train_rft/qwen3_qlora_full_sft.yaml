@@ -17,7 +17,7 @@ lora_dropout: 0.0
 
 ### dataset
 # dataset 由 shell 命令行传入；此处给个默认占位
-dataset: trainset_sft_s1ast_202508_202601_20260608
+dataset: trainset_mini_s1ast_202508_202601_20260608
 template: qwen3_nothink
 cutoff_len: 4596
 max_samples: 200000

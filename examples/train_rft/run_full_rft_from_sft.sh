@@ -1,35 +1,35 @@
 #!/usr/bin/env bash
-# run_full_rft.sh
+# run_full_rft_from_sft.sh
 #
-# 正式 RFT pipeline：M0 SFT → 3 轮 (vLLM 采样 + 打分 + 选 top-1 + LoRA 续训)
-# 8 卡。
+# 跳过 M0 SFT，直接基于一个已有的 SFT LoRA 跑 3 轮 RFT。
+# 用于：SFT 已经训过、希望复用结果重跑 / 续跑 RFT 的场景。
+#
+# 与 run_full_rft.sh 的唯一区别：
+#   - 删掉 Round 0（SFT 训练），改为从 SFT_LORA 直接接 round 1
+#   - RUN_TAG 默认带 from_sft 前缀，避免与 SFT 同跑的产物冲突
+#
+# 使用方式：
+#   1. 改下面的 SFT_LORA 路径，指向已有的 SFT LoRA（含 adapter_config.json）
+#   2. bash examples/train_rft/run_full_rft_from_sft.sh
 #
 # 环境分工:
 #   - 训练 + 打分: llm env
 #   - vLLM 采样: qwen3coder env
-#
-# 使用方式：
-#   bash examples/train_rft/run_full_rft.sh
-#
-# 配置:
-#   - SFT: 50000 条, 10 epochs, lr=1e-5
-#   - RFT: 12500 prompt × n=8 候选, 3 轮, 每轮 2 epoch lr=5e-6
-#   - 估计总耗时: 15-27 小时
-#
-# 产物:
-#   中间: /ldata/share_data/cuishou_conv/tmp/rft_full/<RUN_TAG>/
-#   LoRA: /ldata/share_data/cuishou_conv/models/lora_models/qwen3_32b_rft_full_<RUN_TAG>/
 
 set -euo pipefail
 
 # =========================================================================
-# wandb 实验名（每次跑前可改 RUN_TAG；本地 wandb 请确保已 wandb offline）
-# 同一 RUN_TAG 下：M0/round1/round2/round3 是 4 个独立 run，归到同一 group
+# ⚠️ 必改：已有的 SFT LoRA 路径（必须包含 adapter_config.json）
 # =========================================================================
-RUN_TAG=full_$(date +%Y%m%d_%H%M%S)
+SFT_LORA=/ldata/share_data/cuishou_conv/models/lora_models/qwen3_32b_rft_full_20260608_175236/m0_sft/checkpoint-3865
+
+# =========================================================================
+# wandb 实验名
+# =========================================================================
+RUN_TAG=from_sft_$(date +%Y%m%d_%H%M%S)
 export WANDB_PROJECT=rc_conv
 export WANDB_RUN_GROUP=$RUN_TAG
-echo "[run_full_rft] WANDB_RUN_GROUP=$WANDB_RUN_GROUP"
+echo "[run_full_rft_from_sft] WANDB_RUN_GROUP=$WANDB_RUN_GROUP"
 
 # =========================================================================
 # 路径与参数
@@ -41,22 +41,19 @@ PY_LLM=/home/gerald.hu/.conda/envs/llm/bin/python
 PY_VLLM=/home/gerald.hu/.conda/envs/qwen3coder/bin/python
 ACCEL_LLM=/home/gerald.hu/.conda/envs/llm/bin/accelerate
 
-# 数据文件目录
 DATA_DIR=$LLAMA_FACTORY/data
 
-# 中间产物（candidates / scored / top1）
 TMP_ROOT=/ldata/share_data/cuishou_conv/tmp/rft_full/$RUN_TAG
 mkdir -p "$TMP_ROOT"
 
-# 最终 LoRA 产物（与 qwen3_32b_gen_cuishou_long3k_0605 同级）
 LORA_ROOT=/ldata/share_data/cuishou_conv/models/lora_models/qwen3_32b_rft_${RUN_TAG}
 mkdir -p "$LORA_ROOT"
 
-echo "[run_full_rft] TMP_ROOT  = $TMP_ROOT"
-echo "[run_full_rft] LORA_ROOT = $LORA_ROOT"
+echo "[run_full_rft_from_sft] SFT_LORA  = $SFT_LORA"
+echo "[run_full_rft_from_sft] TMP_ROOT  = $TMP_ROOT"
+echo "[run_full_rft_from_sft] LORA_ROOT = $LORA_ROOT"
 
-# 数据集（已通过 dataset_info.json 注册）
-SFT_DATASET=trainset_sft_s1ast_202508_202601_20260608
+# 数据集
 RFT_PROMPT_DATASET=trainset_rft_s1ast_202508_202601_20260608
 RFT_PROMPT_PATH=$DATA_DIR/${RFT_PROMPT_DATASET}.json
 
@@ -71,18 +68,16 @@ NPROC=8
 ACCEL_PORT=29555
 VLLM_TP=8
 
-# RFT 采样参数（完全对齐 notebook cell 4，no_think=True）
+# RFT 采样参数
 RFT_N=8
-RFT_TEMP=0.2
-RFT_TOPP=0.98
-RFT_REP_PENALTY=1.2
-RFT_PRESENCE_PENALTY=0.4
-RFT_MAXTOK=1024
+RFT_TEMP=0.9
+RFT_TOPP=0.95
+RFT_MAXTOK=512
 
 N_ROUNDS=3
 
 # =========================================================================
-# 工具函数：找最新的 checkpoint-* 子目录
+# 工具函数
 # =========================================================================
 latest_checkpoint() {
     local d=$1
@@ -92,37 +87,29 @@ latest_checkpoint() {
     elif [[ -f "$d/adapter_config.json" ]]; then
         echo "$d"
     else
-        echo "[run_full_rft] ERROR: no adapter_config.json under $d" >&2
+        echo "[run_full_rft_from_sft] ERROR: no adapter_config.json under $d" >&2
         return 1
     fi
 }
 
 # =========================================================================
-# Round 0: M0 SFT
+# 校验 SFT_LORA 存在
 # =========================================================================
-echo "=========================================="
-echo "[run_full_rft] Round 0 (SFT)"
-echo "=========================================="
-M0_DIR=$LORA_ROOT/m0_sft
-SFT_YAML=$TRAIN_RFT_DIR/qwen3_qlora_full_sft.yaml
-
-cd "$LLAMA_FACTORY"
-CUDA_VISIBLE_DEVICES=$GPU_TRAIN $PY_LLM -m llamafactory.cli train "$SFT_YAML" \
-    output_dir="$M0_DIR" \
-    dataset="$SFT_DATASET" \
-    run_name="${RUN_TAG}_m0_sft"
-echo "[run_full_rft] M0 SFT done at $M0_DIR"
-
-PREV_LORA=$(latest_checkpoint "$M0_DIR")
-echo "[run_full_rft] PREV_LORA = $PREV_LORA"
+if [[ ! -f "$SFT_LORA/adapter_config.json" ]]; then
+    echo "[run_full_rft_from_sft] ERROR: SFT_LORA missing adapter_config.json:" >&2
+    echo "  $SFT_LORA" >&2
+    exit 1
+fi
+PREV_LORA=$SFT_LORA
+echo "[run_full_rft_from_sft] PREV_LORA = $PREV_LORA"
 
 # =========================================================================
-# RFT 循环
+# RFT 循环（直接从 round 1 开始）
 # =========================================================================
 for ROUND in $(seq 1 $N_ROUNDS); do
     echo
     echo "=========================================="
-    echo "[run_full_rft] Round $ROUND"
+    echo "[run_full_rft_from_sft] Round $ROUND"
     echo "=========================================="
     ROUND_DIR=$TMP_ROOT/round${ROUND}
     mkdir -p "$ROUND_DIR"
@@ -139,8 +126,6 @@ for ROUND in $(seq 1 $N_ROUNDS); do
         --n $RFT_N \
         --temperature $RFT_TEMP \
         --top_p $RFT_TOPP \
-        --repetition_penalty $RFT_REP_PENALTY \
-        --presence_penalty $RFT_PRESENCE_PENALTY \
         --max_tokens $RFT_MAXTOK \
         --tensor_parallel $VLLM_TP
 
@@ -193,15 +178,10 @@ print('[dataset_info] registered/updated:', key)
 
     PREV_LORA=$(latest_checkpoint "$ROUND_LORA")
     echo "[round $ROUND] PREV_LORA = $PREV_LORA"
-
-    # 提示用户怎么查看本轮 top-1 数据
-    echo "[round $ROUND] 查看本轮 top1 数据采样质量:"
-    echo "  python3 -c \"import json,random; d=json.load(open('$TOP1_JSON')); print('total:', len(d)); [print('---', f'score={x[\\\"_rft_score\\\"]:.4f}', '---', x['target'][:200], '\\\\n') for x in random.sample(d, 10)]\""
 done
 
 echo
 echo "=========================================="
-echo "[run_full_rft] ALL DONE"
+echo "[run_full_rft_from_sft] ALL DONE"
 echo "Final LoRA: $PREV_LORA"
 echo "=========================================="
-

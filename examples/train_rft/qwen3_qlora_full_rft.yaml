@@ -18,7 +18,8 @@ lora_dropout: 0.0
 ### dataset
 template: qwen3_nothink
 cutoff_len: 4596
-max_samples: 200000
+max_samples: 10000
+# todo
 overwrite_cache: true
 preprocessing_num_workers: 16
 
@@ -37,3 +38,6 @@ lr_scheduler_type: cosine
 warmup_ratio: 0.1
 bf16: true
 ddp_timeout: 180000000
+
+
+

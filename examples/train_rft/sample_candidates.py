@@ -40,14 +40,20 @@ def parse_args():
     p.add_argument("--max_samples", type=int, default=None,
                    help="只采前 N 条 prompt；demo 用，不传则全量")
     p.add_argument("--n", type=int, default=8, help="每个 prompt 采 N 条候选")
-    p.add_argument("--temperature", type=float, default=0.9)
-    p.add_argument("--top_p", type=float, default=0.95)
-    p.add_argument("--max_tokens", type=int, default=512,
-                   help="单条候选最大新 token 数")
+    # 完全对齐 notebook cell 4 的 completion(no_think=True) 调用参数
+    p.add_argument("--temperature", type=float, default=0.2)
+    p.add_argument("--top_p", type=float, default=0.98)
+    p.add_argument("--repetition_penalty", type=float, default=1.2)
+    p.add_argument("--presence_penalty", type=float, default=0.4)
+    p.add_argument("--max_tokens", type=int, default=1024)
     p.add_argument("--max_model_len", type=int, default=5000,
                    help="vLLM context 长度上限")
     p.add_argument("--tensor_parallel", type=int, default=1)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--no_think", action="store_true", default=True,
+                   help="注入 </no_think> 标记，关闭 reasoning（与 notebook 对齐，默认 True）")
+    p.add_argument("--chunk_size", type=int, default=500,
+                   help="分批跑：每 N 个 prompt 写一次 output 文件，方便中途查看")
     return p.parse_args()
 
 
@@ -59,7 +65,8 @@ def main():
     print(f"[sample_candidates] lora_path={args.lora_path}")
     print(f"[sample_candidates] input_json={args.input_json}")
     print(f"[sample_candidates] output_json={args.output_json}")
-    print(f"[sample_candidates] n={args.n}, temperature={args.temperature}, top_p={args.top_p}")
+    print(f"[sample_candidates] n={args.n}, temperature={args.temperature}, top_p={args.top_p}, "
+          f"rep_penalty={args.repetition_penalty}, presence_penalty={args.presence_penalty}, max_tokens={args.max_tokens}")
 
     # ---- load prompts ----
     with open(args.input_json) as f:
@@ -68,16 +75,30 @@ def main():
         raw_data = raw_data[: args.max_samples]
     print(f"[sample_candidates] total prompts = {len(raw_data)}")
 
-    # 兼容两种 input 字段：'input'（SFT 风格）或没有时拼 message
+    # 完全对齐 notebook cell 4 的 completion(no_think=True) prompt 拼接：
+    #   <|im_start|>system\nYou are a helpful assistant.<|im_end|>\n
+    #   <|im_start|>user\n{input}\n</no_think><|im_end|>\n   (no_think=True 时)
+    #   <|im_start|>assistant\n   ← 模型从这里开始生成
+    def wrap_chat(raw_input: str) -> str:
+        # 注入自定义 no_think 标记（此标记属于 content 内部）
+        user_inner_content = f"{raw_input}\n</no_think>" if args.no_think else raw_input
+        return (
+            "<|im_start|>system\n"
+            "You are a helpful assistant.<|im_end|>\n"
+            "<|im_start|>user\n"
+            f"{user_inner_content}<|im_end|>\n"
+            "<|im_start|>assistant\n"
+        )
+
     prompts = []
     for d in raw_data:
         if "input" in d:
-            prompts.append(d["input"])
+            base = d["input"]
         elif "message" in d:
-            # message 是 list[str]，拼成对话历史；这里只是兜底，正式应该用 SFT 同款 prompt
-            prompts.append("\n\n".join(m for m in d["message"] if m))
+            base = "\n\n".join(m for m in d["message"] if m)
         else:
             raise ValueError(f"sample missing 'input' or 'message': keys={list(d.keys())}")
+        prompts.append(wrap_chat(base))
 
     # ---- vLLM init ----
     llm_kwargs = dict(
@@ -94,11 +115,16 @@ def main():
 
     llm = LLM(**llm_kwargs)
 
+    # 套了 qwen3_nothink chat template 后，<|im_end|> 是天然边界——
+    # 模型训练时学到的就是"客服 turn 完了出 <|im_end|>"，stop 用它就够。
     sampling_params = SamplingParams(
         n=args.n,
         temperature=args.temperature,
         top_p=args.top_p,
+        repetition_penalty=args.repetition_penalty,
+        presence_penalty=args.presence_penalty,
         max_tokens=args.max_tokens,
+        stop=["<|im_end|>"],
         seed=args.seed,
     )
 
@@ -106,31 +132,51 @@ def main():
         LoRARequest("rft_lora", 1, args.lora_path) if args.lora_path else None
     )
 
-    # ---- generate ----
-    print(f"[sample_candidates] generating {args.n} candidates per prompt...")
-    results = llm.generate(prompts, sampling_params, lora_request=lora_request)
-
-    # ---- flatten ----
-    flat = []
-    for src, res in zip(raw_data, results):
-        for i, out in enumerate(res.outputs):
-            row = dict(src)  # 保留原字段（account_id / message / overdue_days...）
-            row["sample_idx"] = i
-            row["response"] = out.text
-            flat.append(row)
-
+    # ---- generate by chunks（边跑边落盘，方便中途查看 output_json）----
     os.makedirs(os.path.dirname(args.output_json) or ".", exist_ok=True)
-    with open(args.output_json, "w") as f:
-        json.dump(flat, f, ensure_ascii=False, indent=1)
-    print(f"[sample_candidates] saved {len(flat)} rows to {args.output_json}")
-    print(f"[sample_candidates] (= {len(raw_data)} prompts × {args.n} samples)")
+    flat = []
+    n_total = len(prompts)
+    chunk = max(1, args.chunk_size)
+    print(f"[sample_candidates] generating with chunk_size={chunk}, total chunks={(n_total + chunk - 1) // chunk}")
 
-    # 打印前 1 条的全部 N 个候选，做多样性 sanity check
-    print("\n[sample_candidates] sanity preview - prompt 0, all N candidates:")
-    for i, out in enumerate(results[0].outputs):
-        preview = out.text[:120].replace("\n", " ")
-        print(f"  [{i}] {preview!r}")
+    first_chunk_preview = None
+    for start in range(0, n_total, chunk):
+        end = min(start + chunk, n_total)
+        sub_prompts = prompts[start:end]
+        sub_raw = raw_data[start:end]
+        print(f"[sample_candidates] chunk {start}:{end} / {n_total} ...")
+        sub_results = llm.generate(sub_prompts, sampling_params, lora_request=lora_request)
+
+        for src, res in zip(sub_raw, sub_results):
+            for i, out in enumerate(res.outputs):
+                row = dict(src)
+                row["sample_idx"] = i
+                row["response"] = out.text
+                flat.append(row)
+
+        if first_chunk_preview is None and sub_results:
+            first_chunk_preview = sub_results[0]
+
+        # 原子写：先写 .tmp 再 rename
+        tmp_path = args.output_json + ".tmp"
+        with open(tmp_path, "w") as f:
+            json.dump(flat, f, ensure_ascii=False, indent=1)
+        os.replace(tmp_path, args.output_json)
+        print(f"[sample_candidates]   wrote {len(flat)} rows -> {args.output_json}")
+
+    print(f"[sample_candidates] DONE: saved {len(flat)} rows to {args.output_json}")
+    print(f"[sample_candidates] (= {n_total} prompts × {args.n} samples)")
+
+    # 打印第 1 条 prompt 全部 N 个候选作为 sanity check
+    if first_chunk_preview is not None:
+        print("\n[sample_candidates] sanity preview - prompt 0, all N candidates:")
+        for i, out in enumerate(first_chunk_preview.outputs):
+            preview = out.text[:120].replace("\n", " ")
+            print(f"  [{i}] {preview!r}")
 
 
 if __name__ == "__main__":
     main()
+
+
+
